@@ -28,7 +28,12 @@ namespace Il2CppDumper
         private static readonly HashSet<ulong> methodInfoCache = new();
         private static readonly HashSet<string> keyword = new(StringComparer.Ordinal)
         { "klass", "monitor", "register", "_cs", "auto", "friend", "template", "flat", "default", "_ds", "interrupt",
-            "unsigned", "signed", "asm", "if", "case", "break", "continue", "do", "new", "_", "short", "union", "class", "namespace"};
+            "unsigned", "signed", "asm", "if", "case", "break", "continue", "do", "new", "_", "short", "union", "class", "namespace",
+            "static", "catch", "try", "throw", "delete", "private", "public", "protected", "virtual",
+            "return", "switch", "while", "for", "else", "goto", "sizeof", "typeof", "this",
+            "struct", "enum", "typedef", "extern", "volatile", "const", "mutable",
+            "long", "double", "float", "char", "int", "void", "bool", "true", "false",
+            "operator", "explicit", "implicit", "override", "abstract", "event", "delegate"};
         private static readonly HashSet<string> specialKeywords = new(StringComparer.Ordinal)
         { "inline", "near", "far" };
 
@@ -522,6 +527,8 @@ namespace Il2CppDumper
 
         private static string FixName(string str)
         {
+            str = Regex.Replace(str, "[^a-zA-Z0-9_]", "_");
+
             if (keyword.Contains(str))
             {
                 str = "_" + str;
@@ -533,12 +540,10 @@ namespace Il2CppDumper
 
             if (Regex.IsMatch(str, "^[0-9]"))
             {
-                return "_" + str;
+                str = "_" + str;
             }
-            else
-            {
-                return Regex.Replace(str, "[^a-zA-Z0-9_]", "_");
-            }
+
+            return str;
         }
 
         private string ParseType(Il2CppType il2CppType, Il2CppGenericContext context = null)
