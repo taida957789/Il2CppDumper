@@ -32,6 +32,9 @@ namespace Il2CppDumper
             {28,"object"},
         };
         public ulong[] customAttributeGenerators;
+        private Dictionary<ulong, int> typeHandleToTypeDefIndex;
+        private ulong genericParamBase;
+        private ulong genericParamStride;
 
         public Il2CppExecutor(Metadata metadata, Il2Cpp il2Cpp)
         {
@@ -56,27 +59,61 @@ namespace Il2CppDumper
             {
                 customAttributeGenerators = il2Cpp.customAttributeGenerators;
             }
+
+            if (il2Cpp.Version >= 38 && il2Cpp.IsDumped)
+            {
+                typeHandleToTypeDefIndex = new Dictionary<ulong, int>();
+                for (int i = 0; i < metadata.typeDefs.Length; i++)
+                {
+                    var byvalIdx = metadata.typeDefs[i].byvalTypeIndex;
+                    if (byvalIdx >= 0 && byvalIdx < il2Cpp.types.Length)
+                    {
+                        var handle = il2Cpp.types[byvalIdx].datapoint;
+                        typeHandleToTypeDefIndex.TryAdd(handle, i);
+                    }
+                }
+
+                var gpHandles = new SortedSet<ulong>();
+                foreach (var type in il2Cpp.types)
+                {
+                    if (type.type == Il2CppTypeEnum.IL2CPP_TYPE_VAR || type.type == Il2CppTypeEnum.IL2CPP_TYPE_MVAR)
+                        gpHandles.Add(type.datapoint);
+                }
+                if (gpHandles.Count >= 2)
+                {
+                    var sorted = gpHandles.ToList();
+                    genericParamBase = sorted[0];
+                    genericParamStride = sorted[1] - sorted[0];
+                }
+            }
         }
 
         public string GetTypeName(Il2CppType il2CppType, bool addNamespace, bool is_nested)
         {
+            return GetTypeNameInternal(il2CppType, addNamespace, is_nested, 0);
+        }
+
+        private string GetTypeNameInternal(Il2CppType il2CppType, bool addNamespace, bool is_nested, int depth)
+        {
+            if (depth > 64)
+                return "???";
             switch (il2CppType.type)
             {
                 case Il2CppTypeEnum.IL2CPP_TYPE_ARRAY:
                     {
                         var arrayType = il2Cpp.MapVATR<Il2CppArrayType>(il2CppType.data.array);
                         var elementType = il2Cpp.GetIl2CppType(arrayType.etype);
-                        return $"{GetTypeName(elementType, addNamespace, false)}[{new string(',', arrayType.rank - 1)}]";
+                        return $"{GetTypeNameInternal(elementType, addNamespace, false, depth + 1)}[{new string(',', arrayType.rank - 1)}]";
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_SZARRAY:
                     {
                         var elementType = il2Cpp.GetIl2CppType(il2CppType.data.type);
-                        return $"{GetTypeName(elementType, addNamespace, false)}[]";
+                        return $"{GetTypeNameInternal(elementType, addNamespace, false, depth + 1)}[]";
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_PTR:
                     {
                         var oriType = il2Cpp.GetIl2CppType(il2CppType.data.type);
-                        return $"{GetTypeName(oriType, addNamespace, false)}*";
+                        return $"{GetTypeNameInternal(oriType, addNamespace, false, depth + 1)}*";
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_VAR:
                 case Il2CppTypeEnum.IL2CPP_TYPE_MVAR:
@@ -102,7 +139,7 @@ namespace Il2CppDumper
                         }
                         if (typeDef.declaringTypeIndex != -1)
                         {
-                            str += GetTypeName(il2Cpp.types[typeDef.declaringTypeIndex], addNamespace, true);
+                            str += GetTypeNameInternal(il2Cpp.types[typeDef.declaringTypeIndex], addNamespace, true, depth + 1);
                             str += '.';
                         }
                         else if (addNamespace)
@@ -294,6 +331,10 @@ namespace Il2CppDumper
         {
             if (il2Cpp.Version >= 27 && il2Cpp.IsDumped)
             {
+                if (typeHandleToTypeDefIndex != null && typeHandleToTypeDefIndex.TryGetValue(il2CppType.data.typeHandle, out var idx))
+                {
+                    return metadata.typeDefs[idx];
+                }
                 var offset = il2CppType.data.typeHandle - metadata.ImageBase - metadata.header.typeDefinitionsOffset;
                 var index = offset / (ulong)metadata.SizeOf(typeof(Il2CppTypeDefinition));
                 return metadata.typeDefs[index];
@@ -308,9 +349,14 @@ namespace Il2CppDumper
         {
             if (il2Cpp.Version >= 27 && il2Cpp.IsDumped)
             {
+                if (genericParamStride > 0)
+                {
+                    var index = (il2CppType.data.genericParameterHandle - genericParamBase) / genericParamStride;
+                    return metadata.genericParameters[index];
+                }
                 var offset = il2CppType.data.genericParameterHandle - metadata.ImageBase - metadata.header.genericParametersOffset;
-                var index = offset / (ulong)metadata.SizeOf(typeof(Il2CppGenericParameter));
-                return metadata.genericParameters[index];
+                var index2 = offset / (ulong)metadata.SizeOf(typeof(Il2CppGenericParameter));
+                return metadata.genericParameters[index2];
             }
             else
             {

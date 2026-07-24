@@ -59,6 +59,8 @@ namespace Il2CppDumper
                 var imageName = metadata.GetStringFromIndex(imageDef.nameIndex);
                 var aname = metadata.assemblyDefs[imageDef.assemblyIndex].aname;
                 var assemblyName = metadata.GetStringFromIndex(aname.nameIndex);
+                if (string.IsNullOrEmpty(assemblyName))
+                    assemblyName = $"Assembly_{imageDef.assemblyIndex}";
                 Version vers;
                 if (aname.build >= 0)
                 {
@@ -624,7 +626,10 @@ namespace Il2CppDumper
                                     var customAttributeNamedArgument = new CustomAttributeNamedArgument(propertyDefinition.Name, customAttributeArgument);
                                     customAttribute.Properties.Add(customAttributeNamedArgument);
                                 }
-                                customAttributes.Add(customAttribute);
+                                if (ValidateCustomAttribute(customAttribute))
+                                {
+                                    customAttributes.Add(customAttribute);
+                                }
                             }
                         }
                     }
@@ -681,7 +686,9 @@ namespace Il2CppDumper
                 }
                 else
                 {
-                    val = new CustomAttributeArgument(GetBlobValueTypeReference(blobValue, memberReference), val);
+                    var blobTypeRef = GetBlobValueTypeReference(blobValue, memberReference);
+                    blobTypeRef = EnsureSerializableEnumType(blobTypeRef, blobValue, memberReference);
+                    val = new CustomAttributeArgument(blobTypeRef, val);
                 }
             }
             else if (val == null)
@@ -703,7 +710,113 @@ namespace Il2CppDumper
             {
                 val = GetTypeReference(memberReference, (Il2CppType)val);
             }
+            typeReference = EnsureSerializableEnumType(typeReference, blobValue, memberReference);
             return new CustomAttributeArgument(typeReference, val);
+        }
+
+        private static bool ValidateCustomAttribute(CustomAttribute attr)
+        {
+            try
+            {
+                foreach (var arg in attr.ConstructorArguments)
+                    ValidateArgType(arg);
+                foreach (var field in attr.Fields)
+                    ValidateArgType(field.Argument);
+                foreach (var prop in attr.Properties)
+                    ValidateArgType(prop.Argument);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void ValidateArgType(CustomAttributeArgument arg)
+        {
+            var typeRef = arg.Type;
+            if (typeRef == null) return;
+            if (typeRef is ArrayType at)
+            {
+                if (arg.Value is CustomAttributeArgument[] arr)
+                    foreach (var elem in arr)
+                        ValidateArgType(elem);
+                return;
+            }
+            if (arg.Value is CustomAttributeArgument boxed)
+            {
+                ValidateArgType(boxed);
+                return;
+            }
+            var resolved = typeRef.Resolve();
+            if (resolved == null) throw new Exception($"Cannot resolve {typeRef.FullName}");
+            if (!resolved.IsEnum) return;
+            bool found = false;
+            foreach (var f in resolved.Fields)
+            {
+                if (f.Name == "value__" && f.IsRuntimeSpecialName)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) throw new Exception($"Enum {typeRef.FullName} has no value__");
+        }
+
+        private TypeReference EnsureSerializableEnumType(TypeReference typeRef, BlobValue blobValue, MemberReference memberReference)
+        {
+            if (typeRef == null || typeRef is ArrayType || typeRef.IsPrimitive) return typeRef;
+            if (typeRef.FullName == "System.String" || typeRef.FullName == "System.Type" || typeRef.FullName == "System.Object") return typeRef;
+            try
+            {
+                var resolved = typeRef.Resolve();
+                if (resolved == null)
+                {
+                    return GetPrimitiveTypeRef(blobValue.il2CppTypeEnum, memberReference.Module) ?? typeRef;
+                }
+                if (resolved.IsEnum)
+                {
+                    bool hasValue = false;
+                    foreach (var f in resolved.Fields)
+                    {
+                        if (f.Name == "value__" && f.IsRuntimeSpecialName)
+                        {
+                            hasValue = true;
+                            break;
+                        }
+                    }
+                    if (!hasValue)
+                    {
+                        return GetPrimitiveTypeRef(blobValue.il2CppTypeEnum, memberReference.Module) ?? typeRef;
+                    }
+                }
+            }
+            catch
+            {
+                return GetPrimitiveTypeRef(blobValue.il2CppTypeEnum, memberReference.Module) ?? typeRef;
+            }
+            return typeRef;
+        }
+
+        private TypeReference GetPrimitiveTypeRef(Il2CppTypeEnum typeEnum, ModuleDefinition module)
+        {
+            switch (typeEnum)
+            {
+                case Il2CppTypeEnum.IL2CPP_TYPE_BOOLEAN: return module.ImportReference(typeSystem.Boolean);
+                case Il2CppTypeEnum.IL2CPP_TYPE_CHAR: return module.ImportReference(typeSystem.Char);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I1: return module.ImportReference(typeSystem.SByte);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U1: return module.ImportReference(typeSystem.Byte);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I2: return module.ImportReference(typeSystem.Int16);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U2: return module.ImportReference(typeSystem.UInt16);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I4: return module.ImportReference(typeSystem.Int32);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U4: return module.ImportReference(typeSystem.UInt32);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I8: return module.ImportReference(typeSystem.Int64);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U8: return module.ImportReference(typeSystem.UInt64);
+                case Il2CppTypeEnum.IL2CPP_TYPE_R4: return module.ImportReference(typeSystem.Single);
+                case Il2CppTypeEnum.IL2CPP_TYPE_R8: return module.ImportReference(typeSystem.Double);
+                case Il2CppTypeEnum.IL2CPP_TYPE_STRING: return module.ImportReference(typeSystem.String);
+                default: return null;
+            }
         }
 
         private TypeReference GetBlobValueTypeReference(BlobValue blobValue, MemberReference memberReference)

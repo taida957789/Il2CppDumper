@@ -104,16 +104,12 @@ namespace Il2CppDumper
             var dataList = new List<SectionHeader>();
             foreach (var section in sections)
             {
-                switch (section.Characteristics)
-                {
-                    case 0x60000020:
-                        execList.Add(section);
-                        break;
-                    case 0x40000040:
-                    case 0xC0000040:
-                        dataList.Add(section);
-                        break;
-                }
+                if (section.SizeOfRawData == 0) continue;
+                var c = section.Characteristics;
+                if ((c & 0x20000000) != 0 && (c & 0x20) != 0) // MEM_EXECUTE + CNT_CODE
+                    execList.Add(section);
+                if ((c & 0x40000000) != 0 && (c & 0x40) != 0) // MEM_READ + CNT_INITIALIZED_DATA
+                    dataList.Add(section);
             }
             var sectionHelper = new SectionHelper(this, methodCount, typeDefinitionsCount, metadataUsagesCount, imageCount);
             var data = dataList.ToArray();

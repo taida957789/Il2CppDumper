@@ -120,6 +120,8 @@ namespace Il2CppDumper
         [Version(Min = 20)]
         public int referencedAssemblyCount;
         public Il2CppAssemblyNameDefinition aname;
+        [Version(Min = 38)]
+        public uint moduleToken;
     }
 
     public class Il2CppAssemblyNameDefinition
@@ -175,6 +177,7 @@ namespace Il2CppDumper
 
         public int declaringTypeIndex;
         public int parentIndex;
+        [Version(Max = 31)]
         public int elementTypeIndex; // we can probably remove this one. Only used for enums
 
         [Version(Max = 24.1)]
@@ -320,6 +323,7 @@ namespace Il2CppDumper
 
     public class Il2CppStringLiteral
     {
+        [Version(Max = 31)]
         public uint length;
         public int dataIndex;
     }
@@ -416,5 +420,12 @@ namespace Il2CppDumper
     {
         public uint token;
         public uint startOffset;
+    }
+
+    public class Il2CppSectionMetadata
+    {
+        public int offset;
+        public int sectionSize;
+        public int count;
     }
 }
